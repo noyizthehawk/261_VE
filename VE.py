@@ -20,7 +20,7 @@ def var_elimination(factors, observations, query_name, var_order):
     """
     Performs the variable elimination to compute the distribution of
     `query_name` conditional on `observations`.
-
+    
     Args:
       factors:
         Collection of `Factor` objects representing the conditional
@@ -32,12 +32,72 @@ def var_elimination(factors, observations, query_name, var_order):
         Name of the variable to compute a posterior distribution factor for.
       var_order:
         Sequence of variable names indicating the variable ordering to use.
-
+    
     Returns:
       A `Factor` object with a single variable (`query_name`), with the results
       of the query.
     """
-    #TODO
+    # Make a copy of the factors
+    working_factors = list(factors)
+    
+    # Condition on the observations
+    for var_name, var_value in observations.items():
+        new_factors = []
+        for f in working_factors:
+            if var_name in f.names:
+                # Replace this factor with a conditioned version
+                new_factors.append(f.condition(var_name, var_value))
+            else:
+                # Keep this factor unchanged
+                new_factors.append(f)
+        working_factors = new_factors
+    
+    # Eliminate variables in the given order
+    for var_name in var_order:
+        # Skip observed variables and the query variable
+        if var_name in observations or var_name == query_name:
+            continue
+        
+        # Find all factors containing the variable
+        relevant_factors = []
+        irrelevant_factors = []
+        
+        for f in working_factors:
+            if var_name in f.names:
+                relevant_factors.append(f)
+            else:
+                irrelevant_factors.append(f)
+        
+        # Skip if there are no factors with this variable
+        if not relevant_factors:
+            continue
+        
+        # Multiply all factors containing the variable
+        product = relevant_factors[0]
+        for i in range(1, len(relevant_factors)):
+            product = product * relevant_factors[i]
+        
+        # Sum out the variable
+        summed = product.sum_out(var_name)
+        
+        # Replace the relevant factors with the new factor
+        working_factors = irrelevant_factors + [summed]
+    
+    # Multiply all remaining factors
+    if not working_factors:
+        raise ValueError("No factors remaining after elimination")
+    
+    result = working_factors[0]
+    for i in range(1, len(working_factors)):
+        result = result * working_factors[i]
+    
+    # Ensure the result only contains the query variable
+    for var_name in result.names:
+        if var_name != query_name:
+            result = result.sum_out(var_name)
+    
+    # Normalize the result
+    return result.normalize()
     
 
 def example_bn():
@@ -51,8 +111,69 @@ def example_bn():
                ((0, 0.25),
                 (1, 0.75))),
 
-        # TODO
-        ]
+        # Pr(B | A)
+        Factor({'A': (0,1), 'B': (0,1)},
+               ((0, 0, 1.0),     # Pr(B=0|A=0) = 2^(-0) = 1
+                (0, 1, 0.0),     # Pr(B=1|A=0) = 1-2^(-0) = 0
+                (1, 0, 0.5),     # Pr(B=0|A=1) = 2^(-1) = 0.5
+                (1, 1, 0.5))),   # Pr(B=1|A=1) = 1-2^(-1) = 0.5
+
+        # Pr(C | A, B)
+        Factor({'A': (0,1), 'B': (0,1), 'C': (0,1)},
+               ((0, 0, 0, 1.0),      # Pr(C=0|A=0,B=0) = 2^(-0) = 1
+                (0, 0, 1, 0.0),      # Pr(C=1|A=0,B=0) = 1-2^(-0) = 0
+                (0, 1, 0, 0.5),      # Pr(C=0|A=0,B=1) = 2^(-1) = 0.5
+                (0, 1, 1, 0.5),      # Pr(C=1|A=0,B=1) = 1-2^(-1) = 0.5
+                (1, 0, 0, 0.5),      # Pr(C=0|A=1,B=0) = 2^(-1) = 0.5
+                (1, 0, 1, 0.5),      # Pr(C=1|A=1,B=0) = 1-2^(-1) = 0.5
+                (1, 1, 0, 0.25),     # Pr(C=0|A=1,B=1) = 2^(-2) = 0.25
+                (1, 1, 1, 0.75))),   # Pr(C=1|A=1,B=1) = 1-2^(-2) = 0.75
+
+        # Pr(D | A, C)
+        Factor({'A': (0,1), 'C': (0,1), 'D': (0,1)},
+               ((0, 0, 0, 1.0),      # Pr(D=0|A=0,C=0) = 2^(-0) = 1
+                (0, 0, 1, 0.0),      # Pr(D=1|A=0,C=0) = 1-2^(-0) = 0
+                (0, 1, 0, 0.5),      # Pr(D=0|A=0,C=1) = 2^(-1) = 0.5
+                (0, 1, 1, 0.5),      # Pr(D=1|A=0,C=1) = 1-2^(-1) = 0.5
+                (1, 0, 0, 0.5),      # Pr(D=0|A=1,C=0) = 2^(-1) = 0.5
+                (1, 0, 1, 0.5),      # Pr(D=1|A=1,C=0) = 1-2^(-1) = 0.5
+                (1, 1, 0, 0.25),     # Pr(D=0|A=1,C=1) = 2^(-2) = 0.25
+                (1, 1, 1, 0.75))),   # Pr(D=1|A=1,C=1) = 1-2^(-2) = 0.75
+
+        # Pr(E | A, D)
+        Factor({'A': (0,1), 'D': (0,1), 'E': (0,1)},
+               ((0, 0, 0, 1.0),      # Pr(E=0|A=0,D=0) = 2^(-0) = 1
+                (0, 0, 1, 0.0),      # Pr(E=1|A=0,D=0) = 1-2^(-0) = 0
+                (0, 1, 0, 0.5),      # Pr(E=0|A=0,D=1) = 2^(-1) = 0.5
+                (0, 1, 1, 0.5),      # Pr(E=1|A=0,D=1) = 1-2^(-1) = 0.5
+                (1, 0, 0, 0.5),      # Pr(E=0|A=1,D=0) = 2^(-1) = 0.5
+                (1, 0, 1, 0.5),      # Pr(E=1|A=1,D=0) = 1-2^(-1) = 0.5
+                (1, 1, 0, 0.25),     # Pr(E=0|A=1,D=1) = 2^(-2) = 0.25
+                (1, 1, 1, 0.75))),   # Pr(E=1|A=1,D=1) = 1-2^(-2) = 0.75
+
+        # Pr(F | A, E)
+        Factor({'A': (0,1), 'E': (0,1), 'F': (0,1)},
+               ((0, 0, 0, 1.0),      # Pr(F=0|A=0,E=0) = 2^(-0) = 1
+                (0, 0, 1, 0.0),      # Pr(F=1|A=0,E=0) = 1-2^(-0) = 0
+                (0, 1, 0, 0.5),      # Pr(F=0|A=0,E=1) = 2^(-1) = 0.5
+                (0, 1, 1, 0.5),      # Pr(F=1|A=0,E=1) = 1-2^(-1) = 0.5
+                (1, 0, 0, 0.5),      # Pr(F=0|A=1,E=0) = 2^(-1) = 0.5
+                (1, 0, 1, 0.5),      # Pr(F=1|A=1,E=0) = 1-2^(-1) = 0.5
+                (1, 1, 0, 0.25),     # Pr(F=0|A=1,E=1) = 2^(-2) = 0.25
+                (1, 1, 1, 0.75))),   # Pr(F=1|A=1,E=1) = 1-2^(-2) = 0.75
+
+        # Pr(G | B, C)
+        Factor({'B': (0,1), 'C': (0,1), 'G': (0,1)},
+               ((0, 0, 0, 1.0),      # Pr(G=0|B=0,C=0) = 2^(-0) = 1
+                (0, 0, 1, 0.0),      # Pr(G=1|B=0,C=0) = 1-2^(-0) = 0
+                (0, 1, 0, 0.5),      # Pr(G=0|B=0,C=1) = 2^(-1) = 0.5
+                (0, 1, 1, 0.5),      # Pr(G=1|B=0,C=1) = 1-2^(-1) = 0.5
+                (1, 0, 0, 0.5),      # Pr(G=0|B=1,C=0) = 2^(-1) = 0.5
+                (1, 0, 1, 0.5),      # Pr(G=1|B=1,C=0) = 1-2^(-1) = 0.5
+                (1, 1, 0, 0.25),     # Pr(G=0|B=1,C=1) = 2^(-2) = 0.25
+                (1, 1, 1, 0.75)))    # Pr(G=1|B=1,C=1) = 1-2^(-2) = 0.75
+    ]
+        
 
 class Factor(object):
     """Represents a factor with associated operations for variable elimination."""
@@ -88,7 +209,21 @@ class Factor(object):
         new_domains = dict(self.domains) # copy own domains...
         del new_domains[name]            # ... except for `name`
         new_f = Factor(new_domains)
-        # TODO
+        
+        # For each key in the new factor
+        for k in new_f.keys:
+            # Create a dictionary mapping variable names to values
+            h = dict(zip(new_f.names, k))
+            
+            # Add the conditioned variable with its fixed value
+            h[name] = val
+            
+            # Create a key for the original factor
+            original_key = tuple(h[n] for n in self.names)
+            
+            # Set the value in the new factor
+            new_f[k] = self[original_key]
+        
         return new_f
 
     def sum_out(self, name):
@@ -97,7 +232,26 @@ class Factor(object):
         new_domains = dict(self.domains) # copy own domains...
         del new_domains[name]            # ... except for `name`
         new_f = Factor(new_domains)
-        # TODO
+        
+        # For each combination of values in the new factor
+        for k in new_f.keys:
+            total = 0
+            # Create dictionary mapping variable names to values
+            h = dict(zip(new_f.names, k))
+            
+            # Sum over all values of the marginalized variable
+            for val in self.domain(name):
+                h[name] = val
+                
+                # Create a key for the original factor
+                original_key = tuple(h[n] for n in self.names)
+                
+                # Add to the sum
+                total += self[original_key]
+            
+            # Set the value in the new factor
+            new_f[k] = total
+        
         return new_f
 
     def normalize(self):
